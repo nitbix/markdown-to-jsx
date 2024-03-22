@@ -1106,10 +1106,13 @@ function getTag(tag: string, overrides: MarkdownToJSX.Overrides) {
     : get(overrides, `${tag}.component`, tag)
 }
 
-export function compiler(
-  markdown: string = '',
-  options: MarkdownToJSX.Options = {}
-) {
+/**
+ * Use `createMarkdown` to gain separate access to the parser and/or compiler. This allows
+ * you to consume markdown-to-jsx's AST nodes and implement your own completely custom
+ * compiler scheme if desired. See the `MarkdownToJSX.ParserResult` type for all potential
+ * AST nodes.
+ */
+export function createMarkdown(options: MarkdownToJSX.Options = {}) {
   options.overrides = options.overrides || {}
   options.slugify = options.slugify || slugify
   options.namedCodesToUnicode = options.namedCodesToUnicode
@@ -1142,9 +1145,7 @@ export function compiler(
     )
   }
 
-  function compile(input: string): JSX.Element {
-    input = input.replace(FRONT_MATTER_R, '')
-
+  function isInline(input: string): boolean {
     let inline = false
 
     if (options.forceInline) {
@@ -1157,16 +1158,12 @@ export function compiler(
       inline = SHOULD_RENDER_AS_BLOCK_R.test(input) === false
     }
 
-    const arr = emitter(
-      parser(
-        inline
-          ? input
-          : `${input.trimEnd().replace(TRIM_STARTING_NEWLINES, '')}\n\n`,
-        {
-          inline,
-        }
-      )
-    )
+    return inline
+  }
+
+  function compile(input: string): JSX.Element {
+    const inline = isInline(input)
+    const arr = emitter(parser(input))
 
     while (
       typeof arr[arr.length - 1] === 'string' &&
@@ -1238,11 +1235,6 @@ export function compiler(
   }
 
   if (process.env.NODE_ENV !== 'production') {
-    if (typeof markdown !== 'string') {
-      throw new Error(`markdown-to-jsx: the first argument must be
-                             a string`)
-    }
-
     if (
       Object.prototype.toString.call(options.overrides) !== '[object Object]'
     ) {
@@ -1912,52 +1904,114 @@ export function compiler(
     delete rules[RuleType.htmlSelfClosing]
   }
 
-  const parser = parserFor(rules)
-  const emitter: Function = reactFor(createRenderer(rules, options.renderRule))
+  const doParse = parserFor(rules)
 
-  const jsx = compile(markdown)
+  /**
+   * A function that returns AST for given markdown.
+   */
+  function parser(input: string) {
+    input = input.replace(FRONT_MATTER_R, '')
 
-  if (footnotes.length) {
-    return (
-      <div>
-        {jsx}
-        <footer key="footer">
-          {footnotes.map(function createFootnote(def) {
-            return (
-              <div id={options.slugify(def.identifier)} key={def.identifier}>
-                {def.identifier}
-                {emitter(parser(def.footnote, { inline: true }))}
-              </div>
-            )
-          })}
-        </footer>
-      </div>
+    const inline = isInline(input)
+
+    return doParse(
+      inline
+        ? input
+        : `${input.trimEnd().replace(TRIM_STARTING_NEWLINES, '')}\n\n`,
+      {
+        inline,
+      }
     )
   }
 
-  return jsx
+  const emitter: Function = reactFor(createRenderer(rules, options.renderRule))
+
+  function compiler(markdown: string = '') {
+    if (process.env.NODE_ENV !== 'production') {
+      if (typeof markdown !== 'string') {
+        throw new Error(`markdown-to-jsx: the first argument must be
+                               a string`)
+      }
+    }
+
+    const jsx = compile(markdown)
+
+    if (footnotes.length) {
+      return (
+        <div>
+          {jsx}
+          <footer key="footer">
+            {footnotes.map(function createFootnote(def) {
+              return (
+                <div id={options.slugify(def.identifier)} key={def.identifier}>
+                  {def.identifier}
+                  {emitter(doParse(def.footnote, { inline: true }))}
+                </div>
+              )
+            })}
+          </footer>
+        </div>
+      )
+    }
+
+    return jsx
+  }
+
+  function Markdown({
+    children = '',
+    options,
+    ...props
+  }: {
+    [key: string]: any
+    children: string
+    options?: MarkdownToJSX.Options
+  }) {
+    if (process.env.NODE_ENV !== 'production' && typeof children !== 'string') {
+      console.error(
+        'markdown-to-jsx: <Markdown> component only accepts a single string as a child, received:',
+        children
+      )
+    }
+
+    return React.cloneElement(
+      compiler(children),
+      props as JSX.IntrinsicAttributes
+    )
+  }
+
+  return {
+    compiler,
+    parser,
+    Markdown,
+  }
+}
+
+/**
+ * @deprecated
+ * Use `createMarkdown(options).compiler(input)`
+ */
+export function compiler(
+  markdown: string,
+  options: MarkdownToJSX.Options = {}
+) {
+  return createMarkdown(options).compiler(markdown)
 }
 
 /**
  * A simple HOC for easy React use. Feed the markdown content as a direct child
  * and the rest is taken care of automatically.
  */
-const Markdown: React.FC<{
+function Markdown(props: {
   [key: string]: any
   children: string
   options?: MarkdownToJSX.Options
-}> = ({ children = '', options, ...props }) => {
-  if (process.env.NODE_ENV !== 'production' && typeof children !== 'string') {
-    console.error(
-      'markdown-to-jsx: <Markdown> component only accepts a single string as a child, received:',
-      children
-    )
-  }
-
-  return React.cloneElement(
-    compiler(children, options),
-    props as JSX.IntrinsicAttributes
+}) {
+  const { Markdown: M } = React.useMemo(
+    () => createMarkdown(props.options),
+    [props.options]
   )
+
+  return React.createElement(M, props)
 }
 
 export namespace MarkdownToJSX {
