@@ -50,6 +50,7 @@ export const enum RuleType {
   textBolded = '28',
   textEmphasized = '29',
   textEscaped = '30',
+  textFormatted = '34',
   textMarked = '31',
   textStrikethroughed = '32',
   unorderedList = '33',
@@ -288,34 +289,9 @@ const TABLE_CENTER_ALIGN = /^ *:-+: *$/
 const TABLE_LEFT_ALIGN = /^ *:-+ *$/
 const TABLE_RIGHT_ALIGN = /^ *-+: *$/
 
-/**
- * For inline formatting, this partial attempts to ignore characters that
- * may appear in nested formatting that could prematurely trigger detection
- * and therefore miss content that should have been included.
- */
-const INLINE_SKIP_R =
-  '((?:\\[.*?\\][([].*?[)\\]]|<.*?>(?:.*?<.*?>)?|`.*?`|~~.*?~~|==.*?==|.|\\n)*?)'
-
-/**
- * Detect a sequence like **foo** or __foo__. Note that bold has a higher priority
- * than emphasized to support nesting of both since they share a delimiter.
- */
-const TEXT_BOLD_R = new RegExp(`^([*_])\\1${INLINE_SKIP_R}\\1\\1(?!\\1)`)
-
-/**
- * Detect a sequence like *foo* or _foo_.
- */
-const TEXT_EMPHASIZED_R = new RegExp(`^([*_])${INLINE_SKIP_R}\\1(?!\\1|\\w)`)
-
-/**
- * Detect a sequence like ==foo==.
- */
-const TEXT_MARKED_R = new RegExp(`^==${INLINE_SKIP_R}==`)
-
-/**
- * Detect a sequence like ~~foo~~.
- */
-const TEXT_STRIKETHROUGHED_R = new RegExp(`^~~${INLINE_SKIP_R}~~`)
+// https://regexr.com/7u91c
+const INLINE_FORMATTING_R =
+  /^(([*_])\2|[*_]|~~|==)((?:\[.*?\][([].*?[)\]]|<.*?>(?:.*?<.*?>)?|([*_]+|`|~~|==)[\s\S]+?\4|[\s\S])+?)\1/
 
 const TEXT_ESCAPED_R = /^\\([^0-9A-Za-z\s])/
 
@@ -1873,26 +1849,35 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
       },
     },
 
-    [RuleType.textBolded]: {
-      match: simpleInlineRegex(TEXT_BOLD_R),
+    [RuleType.textFormatted]: {
+      match: simpleInlineRegex(INLINE_FORMATTING_R),
       order: Priority.MED,
       parse(capture, parse, context) {
-        return {
-          // capture[1] -> the syntax control character
-          // capture[2] -> inner content
-          children: parse(capture[2], context),
-        }
-      },
-    },
+        let type
 
-    [RuleType.textEmphasized]: {
-      match: simpleInlineRegex(TEXT_EMPHASIZED_R),
-      order: Priority.LOW,
-      parse(capture, parse, context) {
+        switch (capture[1]) {
+          case '__':
+          case '**':
+            type = RuleType.textBolded
+            break
+          case '_':
+          case '*':
+            type = RuleType.textEmphasized
+            break
+          case '~~':
+            type = RuleType.textStrikethroughed
+            break
+          case '==':
+            type = RuleType.textMarked
+            break
+          default:
+            type = RuleType.text
+            break
+        }
+
         return {
-          // capture[1] -> opening * or _
-          // capture[2] -> inner content
-          children: parse(capture[2], context),
+          children: parse(capture[3], context),
+          type,
         }
       },
     },
@@ -1910,18 +1895,6 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
           type: RuleType.text,
         }
       },
-    },
-
-    [RuleType.textMarked]: {
-      match: simpleInlineRegex(TEXT_MARKED_R),
-      order: Priority.LOW,
-      parse: parseCaptureInline,
-    },
-
-    [RuleType.textStrikethroughed]: {
-      match: simpleInlineRegex(TEXT_STRIKETHROUGHED_R),
-      order: Priority.LOW,
-      parse: parseCaptureInline,
     },
   }
 
