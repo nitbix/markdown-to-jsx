@@ -1,11 +1,4 @@
 /* @jsx h */
-/**
- * markdown-to-jsx is a fork of
- * [simple-markdown v0.2.2](https://github.com/Khan/simple-markdown)
- * from Khan Academy. Thank you Khan devs for making such an awesome
- * and extensible parsing infra... without it, half of the
- * optimizations here wouldn't be feasible. 🙏🏼
- */
 import * as React from 'react'
 
 /**
@@ -1365,7 +1358,7 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     }, {})
   }
 
-  function compiler(input: string) {
+  function compiler(input: string = '') {
     const inline = isInline(input)
     const { ast, context } = parser(input)
     const arr = emitter(ast, context)
@@ -1925,17 +1918,6 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     parser,
     Markdown,
   }
-}
-
-/**
- * @deprecated
- * Use `createMarkdown(options).compiler(input)`
- */
-export function compiler(
-  markdown: string = '',
-  options: MarkdownToJSX.Options = {}
-) {
-  return createMarkdown(options).compiler(markdown)
 }
 
 /**
