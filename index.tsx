@@ -649,6 +649,30 @@ function attributeValueToJSXPropValue(
   return value
 }
 
+function attrStringToMap(str: string): JSX.IntrinsicAttributes {
+  const attributes = str.match(ATTR_EXTRACTOR_R)
+  if (!attributes) {
+    return null
+  }
+
+  return attributes.reduce(function (map, raw, index) {
+    const delimiterIdx = raw.indexOf('=')
+
+    if (delimiterIdx !== -1) {
+      const key = raw
+        .slice(0, delimiterIdx)
+        .trim() as keyof React.AllHTMLAttributes<Element>
+      const value = unquote(raw.slice(delimiterIdx + 1).trim())
+
+      map[key] = attributeValueToJSXPropValue(key, value)
+    } else if (raw !== 'style') {
+      map[raw] = true
+    }
+
+    return map
+  }, {})
+}
+
 function normalizeWhitespace(source: string): string {
   return source
     .replace(CR_NEWLINE_R, '\n')
@@ -930,7 +954,10 @@ function captureNothing() {
   return {}
 }
 
-function reactOutput(options: MarkdownToJSX.Options) {
+function reactOutput(
+  options: MarkdownToJSX.Options,
+  compiler: (input: string) => React.ReactNode
+) {
   const createElementFn = options.createElement || React.createElement
 
   // JSX custom pragma
@@ -955,6 +982,20 @@ function reactOutput(options: MarkdownToJSX.Options) {
       },
       ...children
     )
+  }
+
+  function finalizeAttrs(attrs: JSX.IntrinsicAttributes) {
+    for (const key in attrs) {
+      if (
+        typeof attrs[key] === 'string' &&
+        (HTML_BLOCK_ELEMENT_R.test(attrs[key]) ||
+          HTML_SELF_CLOSING_ELEMENT_R.test(attrs[key]))
+      ) {
+        attrs[key] = compiler(attrs[key].trim())
+      }
+    }
+
+    return attrs
   }
 
   return function (
@@ -1045,14 +1086,14 @@ function reactOutput(options: MarkdownToJSX.Options) {
 
       case RuleType.htmlBlock: {
         return (
-          <node.tag key={context.key} {...node.attrs}>
+          <node.tag key={context.key} {...finalizeAttrs(node.attrs)}>
             {node.text || output(node.children, context)}
           </node.tag>
         )
       }
 
       case RuleType.htmlSelfClosing: {
-        return <node.tag {...node.attrs} key={context.key} />
+        return <node.tag {...finalizeAttrs(node.attrs)} key={context.key} />
       }
 
       case RuleType.image: {
@@ -1229,13 +1270,16 @@ function reactFor(render) {
   }
 }
 
-function createRenderer(options: MarkdownToJSX.Options) {
+function createRenderer(
+  options: MarkdownToJSX.Options,
+  compiler: (input: string) => React.ReactNode
+) {
   return function renderRule(
     ast: MarkdownToJSX.ParserResult,
     render: MarkdownToJSX.RuleOutput,
     context: MarkdownToJSX.Context
   ): React.ReactNode {
-    const renderer = reactOutput(options)
+    const renderer = reactOutput(options, compiler)
 
     return options.renderRule
       ? options.renderRule(
@@ -1319,74 +1363,6 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     }
 
     return inline
-  }
-
-  function attrStringToMap(str: string): JSX.IntrinsicAttributes {
-    const attributes = str.match(ATTR_EXTRACTOR_R)
-    if (!attributes) {
-      return null
-    }
-
-    return attributes.reduce(function (map, raw, index) {
-      const delimiterIdx = raw.indexOf('=')
-
-      if (delimiterIdx !== -1) {
-        const key = raw
-          .slice(0, delimiterIdx)
-          .trim() as keyof React.AllHTMLAttributes<Element>
-        const value = unquote(raw.slice(delimiterIdx + 1).trim())
-
-        const normalizedValue = (map[key] = attributeValueToJSXPropValue(
-          key,
-          value
-        ))
-
-        if (
-          typeof normalizedValue === 'string' &&
-          (HTML_BLOCK_ELEMENT_R.test(normalizedValue) ||
-            HTML_SELF_CLOSING_ELEMENT_R.test(normalizedValue))
-        ) {
-          map[key] = React.cloneElement(compiler(normalizedValue.trim()), {
-            key: index,
-          })
-        }
-      } else if (raw !== 'style') {
-        map[raw] = true
-      }
-
-      return map
-    }, {})
-  }
-
-  function compiler(input: string = '') {
-    const inline = isInline(input)
-    const { ast, context } = parser(input)
-    const arr = emitter(ast, context)
-    const createElementFn = options.createElement || React.createElement
-
-    while (
-      typeof arr[arr.length - 1] === 'string' &&
-      !arr[arr.length - 1].trim()
-    ) {
-      arr.pop()
-    }
-
-    if (options.wrapper === null) {
-      return arr
-    }
-
-    const wrapper = options.wrapper || (inline ? 'span' : 'div')
-    let jsx
-
-    if (arr.length > 1 || options.forceWrapper) {
-      jsx = arr
-    } else if (arr.length === 1) {
-      return arr[0]
-    } else {
-      return null
-    }
-
-    return createElementFn(wrapper, { key: 'outer' }, jsx)
   }
 
   /**
@@ -1888,7 +1864,38 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     return { ast, context }
   }
 
-  const emitter: Function = reactFor(createRenderer(options))
+  function compiler(input: string = ''): React.ReactNode {
+    const inline = isInline(input)
+    const { ast, context } = parser(input)
+    const arr = emitter(ast, context)
+    const createElementFn = options.createElement || React.createElement
+
+    while (
+      typeof arr[arr.length - 1] === 'string' &&
+      !arr[arr.length - 1].trim()
+    ) {
+      arr.pop()
+    }
+
+    if (options.wrapper === null) {
+      return arr
+    }
+
+    const wrapper = options.wrapper || (inline ? 'span' : 'div')
+    let jsx
+
+    if (arr.length > 1 || options.forceWrapper) {
+      jsx = arr
+    } else if (arr.length === 1) {
+      return arr[0]
+    } else {
+      return null
+    }
+
+    return createElementFn(wrapper, { key: 'outer' }, jsx)
+  }
+
+  const emitter: Function = reactFor(createRenderer(options, compiler))
 
   function Markdown({
     children = '',
@@ -1908,9 +1915,13 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
 
     const result = compiler(children)
 
-    return React.isValidElement(result)
-      ? React.cloneElement(compiler(children), props as JSX.IntrinsicAttributes)
-      : result
+    return React.createElement(
+      React.Fragment,
+      {},
+      React.isValidElement(result)
+        ? React.cloneElement(result, props as JSX.IntrinsicAttributes)
+        : result
+    )
   }
 
   return {
@@ -1934,7 +1945,7 @@ function Markdown(props: {
     [props.options]
   )
 
-  return React.createElement(M, props)
+  return M(props)
 }
 
 export namespace MarkdownToJSX {
