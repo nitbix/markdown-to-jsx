@@ -412,21 +412,15 @@ describe('inline textual elements', () => {
   it('should handle escaped text', () => {
     render(compiler('Hello.\\_\\_foo\\_\\_'))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Hello.__foo__
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(`"Hello.__foo__"`)
   })
 
   it('regression test for #188, mismatched syntaxes triggered the wrong result', () => {
     render(compiler('*This should render as normal text, not emphasized._'))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        *This should render as normal text, not emphasized._
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(
+      `"*This should render as normal text, not emphasized._"`
+    )
   })
 
   it('ignore similar syntax inside inline syntax', () => {
@@ -514,11 +508,7 @@ describe('inline textual elements', () => {
   it('replaces common HTML character codes with unicode equivalents so React will render correctly', () => {
     render(compiler('Foo &nbsp; bar&amp;baz.'))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Foo &nbsp; bar&amp;baz.
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(`"Foo &nbsp; bar&amp;baz."`)
   })
 
   it('replaces custom named character codes with unicode equivalents so React will render correctly', () => {
@@ -531,11 +521,9 @@ describe('inline textual elements', () => {
       })
     )
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Apostrophe's and less than ≤ equal
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(
+      `"Apostrophe's and less than ≤ equal"`
+    )
   })
 })
 
@@ -601,9 +589,8 @@ describe('headings', () => {
     render(compiler('#Hello World', { enforceAtxHeadings: true }))
 
     expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        #Hello World
-      </span>
+      "#Hello World
+      "
     `)
   })
 
@@ -3066,11 +3053,7 @@ comment -->`)
   it('#180 handles invalid character error with angle brackets', () => {
     render(compiler('1<2 or 2>1'))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        1&lt;2 or 2&gt;1
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(`"1&lt;2 or 2&gt;1"`)
   })
 
   it('#181 handling of figure blocks', () => {
@@ -3338,11 +3321,9 @@ comment -->`)
         disableParsingRawHTML: true,
       })
     )
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Text with &lt;span&gt;html&lt;/span&gt; inside
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(
+      `"Text with &lt;span&gt;html&lt;/span&gt; inside"`
+    )
   })
 
   it('should render html if disableParsingRawHTML is false', () => {
@@ -3636,6 +3617,24 @@ Each span you copy above increases the time it takes by 2. Also, writing text he
           Each span you copy above increases the time it takes by 2. Also, writing text here increases the time.
         </p>
       </div>
+    `)
+  })
+
+  it('lowercase attributes are accepted', () => {
+    render(
+      compiler(
+        `<video controls width="250"><source src="/media/cc0-videos/flower.webm" type="video/webm" /></video>`
+      )
+    )
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <video controls
+             width="250"
+      >
+        <source src="/media/cc0-videos/flower.webm"
+                type="video/webm"
+        >
+      </video>
     `)
   })
 })
@@ -4121,11 +4120,9 @@ describe('options.namedCodesToUnicode', () => {
 
   it('should replace special HTML characters', () => {
     render(compiler(content, { namedCodesToUnicode }))
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Æ,Á,Â,À,Å,Ã,Ä,Ç,É,Ê,È,Ë,Í,Î,Ì,Ï,Ñ,Ó,Ô,Ò,Ø,Õ,Ö,Ú,Û,Ù,Ü,Ý,á,â,æ,à,å,ã,ä,ç,©,é,ê,è,ë,≥,í,î,ì,ï,«,≤, ,ñ,ó,ô,ò,ø,õ,ö,§,",»,ß,ú,û,ù,ü,ý
-      </span>
-`)
+    expect(root.innerHTML).toMatchInlineSnapshot(
+      `"Æ,Á,Â,À,Å,Ã,Ä,Ç,É,Ê,È,Ë,Í,Î,Ì,Ï,Ñ,Ó,Ô,Ò,Ø,Õ,Ö,Ú,Û,Ù,Ü,Ý,á,â,æ,à,å,ã,ä,ç,©,é,ê,è,ë,≥,í,î,ì,ï,«,≤, ,ñ,ó,ô,ò,ø,õ,ö,§,",»,ß,ú,û,ù,ü,ý"`
+    )
   })
 })
 
@@ -4153,11 +4150,7 @@ describe('options.forceInline', () => {
   it('treats given markdown as inline-context, passing through any block-level markdown syntax', () => {
     render(compiler('# You got it babe!', { forceInline: true }))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        # You got it babe!
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(`"# You got it babe!"`)
   })
 })
 
@@ -4165,11 +4158,7 @@ describe('options.wrapper', () => {
   it('is ignored when there is a single child', () => {
     render(compiler('Hello, world!', { wrapper: 'article' }))
 
-    expect(root.innerHTML).toMatchInlineSnapshot(`
-      <span>
-        Hello, world!
-      </span>
-    `)
+    expect(root.innerHTML).toMatchInlineSnapshot(`"Hello, world!"`)
   })
 
   it('overrides the wrapper element when there are multiple children', () => {
@@ -4234,6 +4223,7 @@ describe('options.createElement', () => {
         createElement(tag, props, children) {
           return React.createElement('custom', props, children)
         },
+        forceWrapper: true,
       })
     )
 
@@ -4248,6 +4238,7 @@ describe('options.createElement', () => {
         createElement() {
           return React.createElement('div')
         },
+        forceWrapper: true,
       })
     )
 
@@ -4595,11 +4586,7 @@ it('should remove YAML front matter', () => {
     `)
   )
 
-  expect(root.innerHTML).toMatchInlineSnapshot(`
-    <span>
-      Hello.
-    </span>
-`)
+  expect(root.innerHTML).toMatchInlineSnapshot(`"Hello."`)
 })
 
 it('handles a holistic example', () => {

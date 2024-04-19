@@ -79,56 +79,6 @@ const enum Priority {
   MIN,
 }
 
-/** TODO: Drop for React 16? */
-const ATTRIBUTE_TO_JSX_PROP_MAP = [
-  'allowFullScreen',
-  'allowTransparency',
-  'autoComplete',
-  'autoFocus',
-  'autoPlay',
-  'cellPadding',
-  'cellSpacing',
-  'charSet',
-  'className',
-  'classId',
-  'colSpan',
-  'contentEditable',
-  'contextMenu',
-  'crossOrigin',
-  'encType',
-  'formAction',
-  'formEncType',
-  'formMethod',
-  'formNoValidate',
-  'formTarget',
-  'frameBorder',
-  'hrefLang',
-  'inputMode',
-  'keyParams',
-  'keyType',
-  'marginHeight',
-  'marginWidth',
-  'maxLength',
-  'mediaGroup',
-  'minLength',
-  'noValidate',
-  'radioGroup',
-  'readOnly',
-  'rowSpan',
-  'spellCheck',
-  'srcDoc',
-  'srcLang',
-  'srcSet',
-  'tabIndex',
-  'useMap',
-].reduce(
-  (obj, x) => {
-    obj[x.toLowerCase()] = x
-    return obj
-  },
-  { for: 'htmlFor' }
-)
-
 const namedCodesToUnicode = {
   amp: '\u0026',
   apos: '\u0027',
@@ -261,19 +211,12 @@ const HTML_BLOCK_ELEMENT_R =
 const HTML_CHAR_CODE_R = /&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-fA-F]{1,6});/gi
 
 const HTML_COMMENT_R = /^<!--[\s\S]*?(?:-->)/
-
-/**
- * borrowed from React 15(https://github.com/facebook/react/blob/894d20744cba99383ffd847dbd5b6e0800355a5c/src/renderers/dom/shared/HTMLDOMPropertyConfig.js)
- */
-const HTML_CUSTOM_ATTR_R = /^(data|aria|x)-[a-z_][a-z\d_.-]*$/
-
 const HTML_SELF_CLOSING_ELEMENT_R =
   /^ *<([a-z][a-z0-9:]*)(?:\s+((?:<.*?>|[^>])*))?\/?>(?!<\/\1>)(\s*\n)?/i
 const INTERPOLATION_R = /^\{.*\}$/
 const LINK_AUTOLINK_BARE_URL_R = /^(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/
 const LINK_AUTOLINK_MAILTO_R = /^<([^ >]+@[^ >]+)>/
 const LINK_AUTOLINK_R = /^<([^ >]+:\/[^ >]+)>/
-const CAPTURE_LETTER_AFTER_HYPHEN = /-([a-z])?/gi
 const NP_TABLE_R =
   /^(.*\|.*)\n(?: *(\|? *[-:]+ *\|[-| :]*)\n((?:.*\|.*\n)*))?\n?/
 const PARAGRAPH_R = /^[^\n]+(?:  \n|\n{2,})/
@@ -596,7 +539,8 @@ function parseTableRow(
             ? { type: RuleType.tableSeparator }
             : { type: RuleType.text, text: fragment }
         )
-      else if (fragment !== '') nodes.push.apply(nodes, parse(fragment, context))
+      else if (fragment !== '')
+        nodes.push.apply(nodes, parse(fragment, context))
       return nodes
     }, [] as MarkdownToJSX.ParserResult[])
   context.inTable = prevInTable
@@ -675,19 +619,6 @@ function getTableStyle(node, colIndex) {
     : {
         textAlign: node.align[colIndex],
       }
-}
-
-/** TODO: remove for react 16 */
-function normalizeAttributeKey(key) {
-  const hyphenIndex = key.indexOf('-')
-
-  if (hyphenIndex !== -1 && key.match(HTML_CUSTOM_ATTR_R) === null) {
-    key = key.replace(CAPTURE_LETTER_AFTER_HYPHEN, function (_, letter) {
-      return letter.toUpperCase()
-    })
-  }
-
-  return key
 }
 
 function attributeValueToJSXPropValue(
@@ -1040,7 +971,7 @@ function reactOutput(options: MarkdownToJSX.Options) {
      */
     output: MarkdownToJSX.RuleOutput,
     context?: MarkdownToJSX.Context
-  ) {
+  ): React.ReactNode {
     switch (node.type) {
       case RuleType.blockQuote: {
         return (
@@ -1310,7 +1241,7 @@ function createRenderer(options: MarkdownToJSX.Options) {
     ast: MarkdownToJSX.ParserResult,
     render: MarkdownToJSX.RuleOutput,
     context: MarkdownToJSX.Context
-  ): React.ReactChild {
+  ): React.ReactNode {
     const renderer = reactOutput(options)
 
     return options.renderRule
@@ -1407,11 +1338,12 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
       const delimiterIdx = raw.indexOf('=')
 
       if (delimiterIdx !== -1) {
-        const key = normalizeAttributeKey(raw.slice(0, delimiterIdx)).trim()
+        const key = raw
+          .slice(0, delimiterIdx)
+          .trim() as keyof React.AllHTMLAttributes<Element>
         const value = unquote(raw.slice(delimiterIdx + 1).trim())
 
-        const mappedKey = ATTRIBUTE_TO_JSX_PROP_MAP[key] || key
-        const normalizedValue = (map[mappedKey] = attributeValueToJSXPropValue(
+        const normalizedValue = (map[key] = attributeValueToJSXPropValue(
           key,
           value
         ))
@@ -1421,15 +1353,12 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
           (HTML_BLOCK_ELEMENT_R.test(normalizedValue) ||
             HTML_SELF_CLOSING_ELEMENT_R.test(normalizedValue))
         ) {
-          map[mappedKey] = React.cloneElement(
-            compiler(normalizedValue.trim()),
-            {
-              key: index,
-            }
-          )
+          map[key] = React.cloneElement(compiler(normalizedValue.trim()), {
+            key: index,
+          })
         }
       } else if (raw !== 'style') {
-        map[ATTRIBUTE_TO_JSX_PROP_MAP[raw] || raw] = true
+        map[raw] = true
       }
 
       return map
@@ -1459,17 +1388,9 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     if (arr.length > 1 || options.forceWrapper) {
       jsx = arr
     } else if (arr.length === 1) {
-      jsx = arr[0]
-
-      // TODO: remove this for React 16
-      if (typeof jsx === 'string') {
-        return createElementFn('span', { key: 'outer' }, jsx)
-      } else {
-        return jsx
-      }
+      return arr[0]
     } else {
-      // TODO: return null for React 16
-      jsx = null
+      return null
     }
 
     return createElementFn(wrapper, { key: 'outer' }, jsx)
@@ -1992,10 +1913,11 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
       )
     }
 
-    return React.cloneElement(
-      compiler(children),
-      props as JSX.IntrinsicAttributes
-    )
+    const result = compiler(children)
+
+    return React.isValidElement(result)
+      ? React.cloneElement(compiler(children), props as JSX.IntrinsicAttributes)
+      : result
   }
 
   return {
@@ -2346,8 +2268,8 @@ export namespace MarkdownToJSX {
     createElement: (
       tag: Parameters<CreateElement>[0],
       props: JSX.IntrinsicAttributes,
-      ...children: React.ReactChild[]
-    ) => React.ReactChild
+      ...children: React.ReactNode[]
+    ) => React.ReactNode
 
     /**
      * Disable the compiler's best-effort transcription of provided raw HTML
@@ -2433,14 +2355,14 @@ export namespace MarkdownToJSX {
      */
     renderRule: (
       /** Resume normal processing, call this function as a fallback if you are not returning custom JSX. */
-      next: () => React.ReactChild,
+      next: () => React.ReactNode,
       /** the current AST node, use `RuleType` against `node.type` for identification */
       node: ParserResult,
       /** use as `renderChildren(node.children)` for block nodes */
       renderChildren: RuleOutput,
       /** contains `key` which should be supplied to the topmost JSX element */
       state: State
-    ) => React.ReactChild
+    ) => React.ReactNode
 
     /**
      * Override normalization of non-URI-safe characters for use in generating

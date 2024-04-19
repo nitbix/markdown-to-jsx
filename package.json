@@ -83,7 +83,7 @@
     "typescript": "^5.4.5"
   },
   "peerDependencies": {
-    "react": ">= 0.14.0"
+    "react": ">= 16"
   },
   "scripts": {
     "prepublish": "in-publish && npm run build && npm run release || not-in-publish",
