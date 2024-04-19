@@ -551,6 +551,39 @@ describe('misc block level elements', () => {
       </blockquote>
     `)
   })
+
+  it('should handle lazy continuation lines of blockquotes', () => {
+    render(compiler('> Line 1\nLine 2\n>Line 3'))
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <blockquote>
+        <p>
+          Line 1
+      Line 2
+      Line 3
+        </p>
+      </blockquote>
+    `)
+  })
+
+  it('should handle consecutive blockquotes', () => {
+    render(compiler('> Something important, perhaps?\n\n> Something else'))
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <div>
+        <blockquote>
+          <p>
+            Something important, perhaps?
+          </p>
+        </blockquote>
+        <blockquote>
+          <p>
+            Something else
+          </p>
+        </blockquote>
+      </div>
+    `)
+  })
 })
 
 describe('headings', () => {
@@ -2274,6 +2307,66 @@ describe('GFM tables', () => {
       </table>
     `)
   })
+
+  it('#568 handle inline syntax around table separators', () => {
+    render(compiler(`|_foo|bar_|\n|-|-|\n|1|2|`))
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <table>
+        <thead>
+          <tr>
+            <th>
+              _foo
+            </th>
+            <th>
+              bar_
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              1
+            </td>
+            <td>
+              2
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    `)
+  })
+
+  it('#568 handle inline code syntax around table separators', () => {
+    render(compiler(`|\`foo|bar\`|baz|\n|-|-|\n|1|2|`))
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <table>
+        <thead>
+          <tr>
+            <th>
+              <code>
+                foo|bar
+              </code>
+            </th>
+            <th>
+              baz
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              1
+            </td>
+            <td>
+              2
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    `)
+  })
 })
 
 describe('arbitrary HTML', () => {
@@ -3396,6 +3489,154 @@ Item detail
             </span>
           </p>
         `)
+  })
+
+  it('#546 perf regression test, self-closing block + block HTML causes exponential degradation', () => {
+    render(
+      compiler(
+        `<span class="oh" data-self-closing="yes" />
+
+You can have anything here. But it's best if the self-closing tag also appears in the document as a pair tag multiple times. We have found it when compiling a table with spans that had a self-closing span at the top.
+
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+<span class="oh">no</span>
+
+Each span you copy above increases the time it takes by 2. Also, writing text here increases the time.`.trim()
+      )
+    )
+
+    expect(root.innerHTML).toMatchInlineSnapshot(`
+      <div>
+        <span class="oh"
+              data-self-closing="yes"
+        >
+        </span>
+        <p>
+          You can have anything here. But it's best if the self-closing tag also appears in the document as a pair tag multiple times. We have found it when compiling a table with spans that had a self-closing span at the top.
+        </p>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <span class="oh">
+          no
+        </span>
+        <p>
+          Each span you copy above increases the time it takes by 2. Also, writing text here increases the time.
+        </p>
+      </div>
+    `)
   })
 })
 

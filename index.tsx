@@ -179,7 +179,7 @@ const ATTR_EXTRACTOR_R =
 
 const AUTOLINK_MAILTO_CHECK_R = /mailto:/i
 const BLOCK_END_R = /\n{2,}$/
-const BLOCKQUOTE_R = /^( *>[^\n]+(\n[^\n]+)*\n*)+\n{2,}/
+const BLOCKQUOTE_R = /^(\s*>[\s\S]*?)(?=\n{2,})/
 const BLOCKQUOTE_TRIM_LEFT_MULTILINE_R = /^ *> ?/gm
 const BREAK_LINE_R = /^ {2,}\n/
 const BREAK_THEMATIC_R = /^(?:( *[-*_])){3,} *(?:\n *)+\n/
@@ -256,7 +256,7 @@ const HEADING_SETEXT_R = /^([^\n]+)\n *(=|-){3,} *(?:\n *)+\n/
  *    \n*
  */
 const HTML_BLOCK_ELEMENT_R =
-  /^ *(?!<[a-z][^ >/]* ?\/>)<([a-z][^ >/]*) ?([^>]*)>\n?(\s*(?:<\1[^>]*?>[\s\S]*?<\/\1>|(?!<\1\b)[\s\S])*?)<\/\1>(?!<\/\1>)\n*/i
+  /^ *(?!<[a-z][^ >/]* ?\/>)<([a-z][^ >/]*) ?((?:[^>]*[^/])?)>\n?(\s*(?:<\1[^>]*?>[\s\S]*?<\/\1>|(?!<\1\b)[\s\S])*?)<\/\1>(?!<\/\1>)\n*/i
 
 const HTML_CHAR_CODE_R = /&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-fA-F]{1,6});/gi
 
@@ -274,7 +274,8 @@ const LINK_AUTOLINK_BARE_URL_R = /^(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/
 const LINK_AUTOLINK_MAILTO_R = /^<([^ >]+@[^ >]+)>/
 const LINK_AUTOLINK_R = /^<([^ >]+:\/[^ >]+)>/
 const CAPTURE_LETTER_AFTER_HYPHEN = /-([a-z])?/gi
-const NP_TABLE_R = /^(.*\|?.*)\n *(\|? *[-:]+ *\|[-| :]*)\n((?:.*\|.*\n)*)\n?/
+const NP_TABLE_R =
+  /^(.*\|.*)\n(?: *(\|? *[-:]+ *\|[-| :]*)\n((?:.*\|.*\n)*))?\n?/
 const PARAGRAPH_R = /^[^\n]+(?:  \n|\n{2,})/
 const REFERENCE_IMAGE_OR_LINK = /^\[([^\]]*)\]:\s+<?([^\s>]+)>?\s*("([^"]*)")?/
 const REFERENCE_IMAGE_R = /^!\[([^\]]*)\] ?\[([^\]]*)\]/
@@ -282,9 +283,7 @@ const REFERENCE_LINK_R = /^\[([^\]]*)\] ?\[([^\]]*)\]/
 const SQUARE_BRACKETS_R = /(\[|\])/g
 const SHOULD_RENDER_AS_BLOCK_R = /(\n|^[-*]\s|^#|^ {2,}|^-{2,}|^>\s)/
 const TAB_R = /\t/g
-const TABLE_SEPARATOR_R = /^ *\| */
 const TABLE_TRIM_PIPES = /(^ *\||\| *$)/g
-const TABLE_CELL_END_TRIM = / *$/
 const TABLE_CENTER_ALIGN = /^ *:-+: *$/
 const TABLE_LEFT_ALIGN = /^ *:-+ *$/
 const TABLE_RIGHT_ALIGN = /^ *-+: *$/
@@ -550,7 +549,7 @@ function unquote(str: string) {
 
 // based on https://stackoverflow.com/a/18123682/1141611
 // not complete, but probably good enough
-function slugify(str: string) {
+export function slugify(str: string) {
   return str
     .replace(/[ÀÁÂÃÄÅàáâãäåæÆ]/g, 'a')
     .replace(/[çÇ]/g, 'c')
@@ -581,11 +580,25 @@ function parseTableAlignCapture(alignCapture: string) {
 function parseTableRow(
   source: string,
   parse: MarkdownToJSX.NestedParser,
-  context: MarkdownToJSX.Context
+  context: MarkdownToJSX.Context,
+  tableOutput: boolean
 ): MarkdownToJSX.ParserResult[][] {
   const prevInTable = context.inTable
   context.inTable = true
-  const tableRow = parse(source.trim(), context)
+  let tableRow = source
+    .trim()
+    // isolate situations where a pipe should be ignored (inline code, HTML)
+    .split(/( *(?:`[^`]*`|<.*?>.*?<\/.*?>(?!<\/.*?>)|\\\||\|) *)/)
+    .reduce((nodes, fragment) => {
+      if (fragment.trim() === '|')
+        nodes.push(
+          tableOutput
+            ? { type: RuleType.tableSeparator }
+            : { type: RuleType.text, text: fragment }
+        )
+      else if (fragment !== '') nodes.push.apply(nodes, parse(fragment, context))
+      return nodes
+    }, [] as MarkdownToJSX.ParserResult[])
   context.inTable = prevInTable
 
   let cells = [[]]
@@ -602,7 +615,7 @@ function parseTableRow(
         (tableRow[i + 1] == null ||
           tableRow[i + 1].type === RuleType.tableSeparator)
       ) {
-        node.text = node.text.replace(TABLE_CELL_END_TRIM, '')
+        node.text = node.text.trimEnd()
       }
       cells[cells.length - 1].push(node)
     }
@@ -624,7 +637,7 @@ function parseTableCells(
   const rowsText = source.trim().split('\n')
 
   return rowsText.map(function (rowText) {
-    return parseTableRow(rowText, parse, context)
+    return parseTableRow(rowText, parse, context, true)
   })
 }
 
@@ -633,18 +646,27 @@ function parseTable(
   parse: MarkdownToJSX.NestedParser,
   context: MarkdownToJSX.Context
 ) {
+  /**
+   * The table syntax makes some other parsing angry so as a bit of a hack even if alignment and/or cell rows are missing,
+   * we'll still run a detected first row through the parser and then just emit a paragraph.
+   */
   context.inline = true
-  const header = parseTableRow(capture[1], parse, context)
-  const align = parseTableAlign(capture[2])
-  const cells = parseTableCells(capture[3], parse, context)
+  const align = capture[2] ? parseTableAlign(capture[2]) : []
+  const cells = capture[3] ? parseTableCells(capture[3], parse, context) : []
+  const header = parseTableRow(capture[1], parse, context, !!cells.length)
   context.inline = false
 
-  return {
-    align: align,
-    cells: cells,
-    header: header,
-    type: RuleType.table,
-  }
+  return cells.length
+    ? {
+        align: align,
+        cells: cells,
+        header: header,
+        type: RuleType.table,
+      }
+    : {
+        children: header,
+        type: RuleType.paragraph,
+      }
 }
 
 function getTableStyle(node, colIndex) {
@@ -965,8 +987,11 @@ function parseBlock(
   children,
   context: MarkdownToJSX.Context
 ): MarkdownToJSX.ParserResult[] {
+  const isCurrentlyInline = context.inline || false
   context.inline = false
-  return parse(children, context)
+  const result = parse(children, context)
+  context.inline = isCurrentlyInline
+  return result
 }
 
 const parseCaptureInline: MarkdownToJSX.Parser<{
@@ -1815,20 +1840,6 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
       parse: parseTable,
     },
 
-    [RuleType.tableSeparator]: {
-      match: function (source, context) {
-        if (!context.inTable) {
-          return null
-        }
-        context.inline = true
-        return TABLE_SEPARATOR_R.exec(source)
-      },
-      order: Priority.HIGH,
-      parse: function () {
-        return { type: RuleType.tableSeparator }
-      },
-    },
-
     [RuleType.text]: {
       // Here we look for anything followed by non-symbols,
       // double newlines, or double-space-newlines
@@ -2310,7 +2321,9 @@ export namespace MarkdownToJSX {
   }
 
   export type Rules = {
-    [K in ParserResult['type']]: Rule<Extract<ParserResult, { type: K }>>
+    [K in ParserResult['type']]: K extends RuleType.table
+      ? Rule<Extract<ParserResult, { type: K | RuleType.paragraph }>>
+      : Rule<Extract<ParserResult, { type: K }>>
   }
 
   export type Override =

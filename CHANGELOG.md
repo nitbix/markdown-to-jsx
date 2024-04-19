@@ -1,5 +1,63 @@
 # markdown-to-jsx
 
+## 7.4.7
+
+### Patch Changes
+
+- 7603248: Fix parsing isolation of individual table cells.
+- f9328cc: Improved block html detection regex to handle certain edge cases that cause extreme slowness. Thank you @devbrains-com for the basis for this fix 🤝
+
+## 7.4.6
+
+### Patch Changes
+
+- a9e5276: Browsers assign element with `id` to the global scope using the value as the variable name. E.g.: `<h1 id="analytics">` can be referenced via `window.analytics`.
+  This can be a problem when a name conflict happens. For instance, pages that expect `analytics.push()` to be a function will stop working if the an element with an `id` of `analytics` exists in the page.
+
+  In this change, we export the `slugify` function so that users can easily augment it.
+  This can be used to avoid variable name conflicts by giving the element a different `id`.
+
+  ```js
+  import { slugify } from 'markdown-to-jsx';
+
+  options={{
+    slugify: str => {
+      let result = slugify(str)
+
+      return result ? '-' + str : result;
+    }
+  }}
+  ```
+
+## 7.4.5
+
+### Patch Changes
+
+- f5a0079: fix: double newline between consecutive blockquote syntax creates separate blockquotes
+
+  Previously, for consecutive blockquotes they were rendered as one:
+
+  **Input**
+
+  ```md
+  > Block A.1
+  > Block A.2
+
+  > Block B.1
+  ```
+
+  **Output**
+
+  ```html
+  <blockquote>
+    <p>Block A.1</p>
+    <p>Block A.2</p>
+    <p>Block.B.1</p>
+  </blockquote>
+  ```
+
+  This is not compliant with the [GFM spec](https://github.github.com/gfm/#block-quotes) which states that consecutive blocks should be created if there is a blank line between them.
+
 ## 7.4.4
 
 ### Patch Changes
