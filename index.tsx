@@ -538,7 +538,7 @@ function parseTableRow(
     }, [] as MarkdownToJSX.ParserResult[])
   context.inTable = prevInTable
 
-  let cells = [[]]
+  let cells: MarkdownToJSX.ParserResult[][] = [[]]
   tableRow.forEach(function (node, i) {
     if (node.type === RuleType.tableSeparator) {
       // Filter out empty table separators at the start/end:
@@ -700,7 +700,7 @@ function normalizeWhitespace(source: string): string {
  *     parsing in src/widgets/passage/passage-markdown.jsx
  */
 function parserFor(
-  rules: MarkdownToJSX.Rules
+  rules: Partial<MarkdownToJSX.Rules>
 ): (
   source: string,
   context: MarkdownToJSX.Context
@@ -1005,7 +1005,7 @@ function reactOutput(
      */
     output: MarkdownToJSX.RuleOutput,
     context?: MarkdownToJSX.Context
-  ): React.ReactNode {
+  ): React.ReactChild {
     switch (node.type) {
       case RuleType.blockQuote: {
         return (
@@ -1233,14 +1233,44 @@ function reactOutput(
   }
 }
 
-function reactFor(render) {
-  return function patchedRender(
+function createRenderer(
+  options: MarkdownToJSX.Options,
+  compiler: (input: string) => React.ReactChild | React.ReactChild[]
+) {
+  return function renderRule(
+    ast: MarkdownToJSX.ParserResult,
+    render: MarkdownToJSX.RuleOutput,
+    context: MarkdownToJSX.Context
+  ): React.ReactChild {
+    const renderer = reactOutput(options, compiler)
+
+    return options.renderRule
+      ? options.renderRule(
+          () => renderer(ast, render, context),
+          ast,
+          render,
+          context
+        )
+      : renderer(ast, render, context)
+  }
+}
+
+function reactFor(render: ReturnType<typeof createRenderer>) {
+  function patchedRender(
+    ast: MarkdownToJSX.ParserResult,
+    context: MarkdownToJSX.Context
+  ): React.ReactChild
+  function patchedRender(
+    ast: MarkdownToJSX.ParserResult[],
+    context: MarkdownToJSX.Context
+  ): React.ReactChild[]
+  function patchedRender(
     ast: MarkdownToJSX.ParserResult | MarkdownToJSX.ParserResult[],
     context: MarkdownToJSX.Context
-  ): React.ReactChild[] {
+  ): React.ReactChild[] | React.ReactChild {
     if (Array.isArray(ast)) {
       const oldKey = context.key
-      const result = []
+      const result: React.ReactChild[] = []
 
       // map nestedOutput over the ast, except group any text
       // nodes together into a single string output.
@@ -1268,28 +1298,8 @@ function reactFor(render) {
 
     return render(ast, patchedRender, context)
   }
-}
 
-function createRenderer(
-  options: MarkdownToJSX.Options,
-  compiler: (input: string) => React.ReactNode
-) {
-  return function renderRule(
-    ast: MarkdownToJSX.ParserResult,
-    render: MarkdownToJSX.RuleOutput,
-    context: MarkdownToJSX.Context
-  ): React.ReactNode {
-    const renderer = reactOutput(options, compiler)
-
-    return options.renderRule
-      ? options.renderRule(
-          () => renderer(ast, render, context),
-          ast,
-          render,
-          context
-        )
-      : renderer(ast, render, context)
-  }
+  return patchedRender
 }
 
 function cx(...args) {
@@ -1365,13 +1375,7 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     return inline
   }
 
-  /**
-   * each rule's react() output function goes through our custom
-   * h() JSX pragma; this allows the override functionality to be
-   * automatically applied
-   */
-  // @ts-ignore
-  const rules: MarkdownToJSX.Rules = {
+  const rules: Partial<MarkdownToJSX.Rules> = {
     [RuleType.blockQuote]: {
       match: blockRegex(BLOCKQUOTE_R),
       order: Priority.HIGH,
@@ -1864,7 +1868,7 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     return { ast, context }
   }
 
-  function compiler(input: string = ''): React.ReactNode {
+  function compiler(input: string = ''): React.ReactChild[] | React.ReactChild {
     const inline = isInline(input)
     const { ast, context } = parser(input)
     const arr = emitter(ast, context)
@@ -1872,7 +1876,7 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
 
     while (
       typeof arr[arr.length - 1] === 'string' &&
-      !arr[arr.length - 1].trim()
+      !(arr[arr.length - 1] as string).trim()
     ) {
       arr.pop()
     }
@@ -1895,7 +1899,7 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     return createElementFn(wrapper, { key: 'outer' }, jsx)
   }
 
-  const emitter: Function = reactFor(createRenderer(options, compiler))
+  const emitter = reactFor(createRenderer(options, compiler))
 
   function Markdown({
     children = '',
@@ -2223,7 +2227,7 @@ export namespace MarkdownToJSX {
   export type RuleOutput = (
     ast: MarkdownToJSX.ParserResult | MarkdownToJSX.ParserResult[],
     context: MarkdownToJSX.Context
-  ) => JSX.Element
+  ) => React.ReactChild
 
   export type Rule<ParserOutput = MarkdownToJSX.ParserResult> = {
     match: (
@@ -2262,7 +2266,7 @@ export namespace MarkdownToJSX {
       tag: Parameters<CreateElement>[0],
       props: JSX.IntrinsicAttributes,
       ...children: React.ReactNode[]
-    ) => React.ReactNode
+    ) => React.ReactChild
 
     /**
      * Disable the compiler's best-effort transcription of provided raw HTML
@@ -2348,14 +2352,14 @@ export namespace MarkdownToJSX {
      */
     renderRule: (
       /** Resume normal processing, call this function as a fallback if you are not returning custom JSX. */
-      next: () => React.ReactNode,
+      next: () => React.ReactChild,
       /** the current AST node, use `RuleType` against `node.type` for identification */
       node: ParserResult,
       /** use as `renderChildren(node.children)` for block nodes */
       renderChildren: RuleOutput,
       /** contains `key` which should be supplied to the topmost JSX element */
       state: State
-    ) => React.ReactNode
+    ) => React.ReactChild
 
     /**
      * Override normalization of non-URI-safe characters for use in generating
