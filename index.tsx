@@ -700,18 +700,18 @@ function normalizeWhitespace(source: string): string {
  *     parsing in src/widgets/passage/passage-markdown.jsx
  */
 function parserFor(
-  rules: Partial<MarkdownToJSX.Rules>
+  rules: [key: RuleType, rule: MarkdownToJSX.Rule][],
+  options: MarkdownToJSX.Options
 ): (
   source: string,
   context: MarkdownToJSX.Context
 ) => ReturnType<MarkdownToJSX.NestedParser> {
   // Sorts rules in order of increasing order, then
   // ascending rule name in case of ties.
-  let ruleList = Object.keys(rules)
-
   if (process.env.NODE_ENV !== 'production') {
-    ruleList.forEach(function (type) {
-      let order = rules[type].order
+    rules.forEach(function (ruleDef) {
+      const [type, { order }] = ruleDef
+
       if (
         process.env.NODE_ENV !== 'production' &&
         (typeof order !== 'number' || !isFinite(order))
@@ -723,14 +723,22 @@ function parserFor(
     })
   }
 
-  ruleList.sort(function (typeA, typeB) {
-    let orderA = rules[typeA].order
-    let orderB = rules[typeB].order
+  const filteredRules = rules.filter(function (tuple) {
+    return tuple[0] === RuleType.text
+      ? true
+      : options.enabledRules.length
+      ? options.enabledRules.indexOf(tuple[0]) !== -1
+      : options.disabledRules!.indexOf(tuple[0]) === -1
+  })
+
+  filteredRules.sort(function (tupleA, tupleB) {
+    const orderA = tupleA[1].order
+    const orderB = tupleB[1].order
 
     // Sort based on increasing order
     if (orderA !== orderB) {
       return orderA - orderB
-    } else if (typeA < typeB) {
+    } else if (tupleA[0] < tupleB[0]) {
       return -1
     }
 
@@ -750,9 +758,8 @@ function parserFor(
     let prevCapture = ''
     while (source) {
       let i = 0
-      while (i < ruleList.length) {
-        const ruleType = ruleList[i]
-        const rule = rules[ruleType]
+      while (i < filteredRules.length) {
+        const [ruleType, rule] = filteredRules[i]
         const capture = rule.match(source, context, prevCapture)
 
         if (capture) {
@@ -1338,8 +1345,10 @@ function getTag(tag: string, overrides: MarkdownToJSX.Overrides) {
  * AST nodes.
  */
 export function createMarkdown(options: MarkdownToJSX.Options = {}) {
-  options.overrides = options.overrides || {}
-  options.slugify = options.slugify || slugify
+  options.disabledRules ||= []
+  options.enabledRules ||= []
+  options.overrides ||= {}
+  options.slugify ||= slugify
   options.namedCodesToUnicode = options.namedCodesToUnicode
     ? { ...namedCodesToUnicode, ...options.namedCodesToUnicode }
     : namedCodesToUnicode
@@ -1375,433 +1384,523 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     return inline
   }
 
-  const rules: Partial<MarkdownToJSX.Rules> = {
-    [RuleType.blockQuote]: {
-      match: blockRegex(BLOCKQUOTE_R),
-      order: Priority.HIGH,
-      parse(capture, parse, context) {
-        return {
-          children: parse(
-            capture[0].replace(BLOCKQUOTE_TRIM_LEFT_MULTILINE_R, ''),
-            context
-          ),
-        }
+  const rules: [key: RuleType, rule: MarkdownToJSX.Rule][] = [
+    [
+      RuleType.blockQuote,
+      {
+        match: blockRegex(BLOCKQUOTE_R),
+        order: Priority.HIGH,
+        parse(capture, parse, context) {
+          return {
+            children: parse(
+              capture[0].replace(BLOCKQUOTE_TRIM_LEFT_MULTILINE_R, ''),
+              context
+            ),
+          }
+        },
       },
-    },
+    ],
 
-    [RuleType.breakLine]: {
-      match: anyScopeRegex(BREAK_LINE_R),
-      order: Priority.HIGH,
-      parse: captureNothing,
-    },
-
-    [RuleType.breakThematic]: {
-      match: blockRegex(BREAK_THEMATIC_R),
-      order: Priority.HIGH,
-      parse: captureNothing,
-    },
-
-    [RuleType.codeBlock]: {
-      match: blockRegex(CODE_BLOCK_R),
-      order: Priority.MAX,
-      parse(capture /*, parse, context*/) {
-        return {
-          lang: undefined,
-          text: capture[0].replace(/^ {4}/gm, '').replace(/\n+$/, ''),
-        }
+    [
+      RuleType.breakLine,
+      {
+        match: anyScopeRegex(BREAK_LINE_R),
+        order: Priority.HIGH,
+        parse: captureNothing,
       },
-    } as MarkdownToJSX.Rule<{
-      attrs?: ReturnType<typeof attrStringToMap>
-      lang?: string
-      text: string
-    }>,
+    ],
 
-    [RuleType.codeFenced]: {
-      match: blockRegex(CODE_BLOCK_FENCED_R),
-      order: Priority.MAX,
-      parse(capture /*, parse, context*/) {
-        return {
-          // if capture[3] it's additional metadata
-          attrs: attrStringToMap(capture[3] || ''),
-          lang: capture[2] || undefined,
-          text: capture[4],
-          type: RuleType.codeBlock,
-        }
+    [
+      RuleType.breakThematic,
+      {
+        match: blockRegex(BREAK_THEMATIC_R),
+        order: Priority.HIGH,
+        parse: captureNothing,
       },
-    },
+    ],
 
-    [RuleType.codeInline]: {
-      match: simpleInlineRegex(CODE_INLINE_R),
-      order: Priority.LOW,
-      parse(capture /*, parse, context*/) {
-        return {
-          text: capture[2],
-        }
+    [
+      RuleType.codeBlock,
+      {
+        match: blockRegex(CODE_BLOCK_R),
+        order: Priority.MAX,
+        parse(capture /*, parse, context*/) {
+          return {
+            lang: undefined,
+            text: capture[0].replace(/^ {4}/gm, '').replace(/\n+$/, ''),
+          }
+        },
+      } as MarkdownToJSX.Rule<{
+        attrs?: ReturnType<typeof attrStringToMap>
+        lang?: string
+        text: string
+      }>,
+    ],
+
+    [
+      RuleType.codeFenced,
+      {
+        match: blockRegex(CODE_BLOCK_FENCED_R),
+        order: Priority.MAX,
+        parse(capture /*, parse, context*/) {
+          return {
+            // if capture[3] it's additional metadata
+            attrs: attrStringToMap(capture[3] || ''),
+            lang: capture[2] || undefined,
+            text: capture[4],
+            type: RuleType.codeBlock,
+          }
+        },
       },
-    },
+    ],
+
+    [
+      RuleType.codeInline,
+      {
+        match: simpleInlineRegex(CODE_INLINE_R),
+        order: Priority.LOW,
+        parse(capture /*, parse, context*/) {
+          return {
+            text: capture[2],
+          }
+        },
+      },
+    ],
 
     /**
      * footnotes are emitted at the end of compilation in a special <footer> block
      */
-    [RuleType.footnote]: {
-      match: blockRegex(FOOTNOTE_R),
-      order: Priority.MAX,
-      parse(capture, parse, context) {
-        context.footnotes.push({
-          footnote: parse(capture[2], { ...context, inline: true }),
-          identifier: capture[1],
-        })
+    [
+      RuleType.footnote,
+      {
+        match: blockRegex(FOOTNOTE_R),
+        order: Priority.MAX,
+        parse(capture, parse, context) {
+          context.footnotes.push({
+            footnote: parse(capture[2], { ...context, inline: true }),
+            identifier: capture[1],
+          })
 
-        return {}
+          return {}
+        },
       },
-    },
+    ],
 
-    [RuleType.footnoteReference]: {
-      match: inlineRegex(FOOTNOTE_REFERENCE_R),
-      order: Priority.HIGH,
-      parse(capture /*, parse*/) {
-        return {
-          target: `#${options.slugify(capture[1])}`,
-          text: capture[1],
-        }
+    [
+      RuleType.footnoteReference,
+      {
+        match: inlineRegex(FOOTNOTE_REFERENCE_R),
+        order: Priority.HIGH,
+        parse(capture /*, parse*/) {
+          return {
+            target: `#${options.slugify(capture[1])}`,
+            text: capture[1],
+          }
+        },
+      } as MarkdownToJSX.Rule<{ target: string; text: string }>,
+    ],
+
+    [
+      RuleType.gfmTask,
+      {
+        match: inlineRegex(GFM_TASK_R),
+        order: Priority.HIGH,
+        parse(capture /*, parse, context*/) {
+          return {
+            completed: capture[1].toLowerCase() === 'x',
+          }
+        },
+      } as MarkdownToJSX.Rule<{ completed: boolean }>,
+    ],
+
+    [
+      RuleType.heading,
+      {
+        match: blockRegex(
+          options.enforceAtxHeadings ? HEADING_ATX_COMPLIANT_R : HEADING_R
+        ),
+        order: Priority.HIGH,
+        parse(capture, parse, context) {
+          return {
+            children: parseInline(parse, capture[2], context),
+            id: options.slugify(capture[2]),
+            level: capture[1].length as MarkdownToJSX.HeadingNode['level'],
+          }
+        },
       },
-    } as MarkdownToJSX.Rule<{ target: string; text: string }>,
+    ],
 
-    [RuleType.gfmTask]: {
-      match: inlineRegex(GFM_TASK_R),
-      order: Priority.HIGH,
-      parse(capture /*, parse, context*/) {
-        return {
-          completed: capture[1].toLowerCase() === 'x',
-        }
+    [
+      RuleType.headingSetext,
+      {
+        match: blockRegex(HEADING_SETEXT_R),
+        order: Priority.MAX,
+        parse(capture, parse, context) {
+          return {
+            children: parseInline(parse, capture[1], context),
+            level: capture[2] === '=' ? 1 : 2,
+            type: RuleType.heading,
+          }
+        },
       },
-    } as MarkdownToJSX.Rule<{ completed: boolean }>,
+    ],
 
-    [RuleType.heading]: {
-      match: blockRegex(
-        options.enforceAtxHeadings ? HEADING_ATX_COMPLIANT_R : HEADING_R
-      ),
-      order: Priority.HIGH,
-      parse(capture, parse, context) {
-        return {
-          children: parseInline(parse, capture[2], context),
-          id: options.slugify(capture[2]),
-          level: capture[1].length as MarkdownToJSX.HeadingNode['level'],
-        }
-      },
-    },
-
-    [RuleType.headingSetext]: {
-      match: blockRegex(HEADING_SETEXT_R),
-      order: Priority.MAX,
-      parse(capture, parse, context) {
-        return {
-          children: parseInline(parse, capture[1], context),
-          level: capture[2] === '=' ? 1 : 2,
-          type: RuleType.heading,
-        }
-      },
-    },
-
-    [RuleType.htmlBlock]: {
-      /**
-       * find the first matching end tag and process the interior
-       */
-      match: anyScopeRegex(HTML_BLOCK_ELEMENT_R),
-      order: Priority.HIGH,
-      parse(capture, parse, context) {
-        const [, whitespace] = capture[3].match(HTML_LEFT_TRIM_AMOUNT_R)
-
-        const trimmer = new RegExp(`^${whitespace}`, 'gm')
-        const trimmed = capture[3].replace(trimmer, '')
-
-        const parseFunc = containsBlockSyntax(trimmed)
-          ? parseBlock
-          : parseInline
-
-        const tagName = capture[1].toLowerCase() as MarkdownToJSX.HTMLTags
-        const noInnerParse =
-          DO_NOT_PROCESS_HTML_ELEMENTS.indexOf(tagName) !== -1
-
-        const ast = {
-          attrs: attrStringToMap(capture[2]),
-          noInnerParse: noInnerParse,
-          tag: (noInnerParse ? tagName : capture[1]).trim(),
-        } as {
-          attrs: ReturnType<typeof attrStringToMap>
-          children?: ReturnType<MarkdownToJSX.NestedParser> | undefined
-          noInnerParse: Boolean
-          tag: MarkdownToJSX.HTMLTags
-          text?: string | undefined
-        }
-
-        context.inAnchor = context.inAnchor || tagName === 'a'
-
-        if (noInnerParse) {
-          ast.text = capture[3]
-        } else {
-          ast.children = parseFunc(parse, trimmed, context)
-        }
-
+    [
+      RuleType.htmlBlock,
+      {
         /**
-         * if another html block is detected within, parse as block,
-         * otherwise parse as inline to pick up any further markdown
+         * find the first matching end tag and process the interior
          */
-        context.inAnchor = false
+        match: anyScopeRegex(HTML_BLOCK_ELEMENT_R),
+        order: Priority.HIGH,
+        parse(capture, parse, context) {
+          const [, whitespace] = capture[3].match(HTML_LEFT_TRIM_AMOUNT_R)
 
-        return ast
-      },
-    },
+          const trimmer = new RegExp(`^${whitespace}`, 'gm')
+          const trimmed = capture[3].replace(trimmer, '')
 
-    [RuleType.htmlSelfClosing]: {
-      /**
-       * find the first matching end tag and process the interior
-       */
-      match: anyScopeRegex(HTML_SELF_CLOSING_ELEMENT_R),
-      order: Priority.HIGH,
-      parse(capture /*, parse, context*/) {
-        return {
-          attrs: attrStringToMap(capture[2] || ''),
-          tag: capture[1].trim(),
-        }
-      },
-    },
+          const parseFunc = containsBlockSyntax(trimmed)
+            ? parseBlock
+            : parseInline
 
-    [RuleType.htmlComment]: {
-      match: anyScopeRegex(HTML_COMMENT_R),
-      order: Priority.HIGH,
-      parse() {
-        return {}
-      },
-    },
+          const tagName = capture[1].toLowerCase() as MarkdownToJSX.HTMLTags
+          const noInnerParse =
+            DO_NOT_PROCESS_HTML_ELEMENTS.indexOf(tagName) !== -1
 
-    [RuleType.image]: {
-      match: simpleInlineRegex(IMAGE_R),
-      order: Priority.HIGH,
-      parse(capture /*, parse, context*/) {
-        return {
-          alt: capture[1],
-          target: unescapeUrl(capture[2]),
-          title: capture[3],
-        }
-      },
-    } as MarkdownToJSX.Rule<{
-      alt?: string
-      target: string
-      title?: string
-    }>,
+          const ast = {
+            attrs: attrStringToMap(capture[2]),
+            noInnerParse: noInnerParse,
+            tag: (noInnerParse ? tagName : capture[1]).trim(),
+          } as {
+            attrs: ReturnType<typeof attrStringToMap>
+            children?: ReturnType<MarkdownToJSX.NestedParser> | undefined
+            noInnerParse: Boolean
+            tag: MarkdownToJSX.HTMLTags
+            text?: string | undefined
+          }
 
-    [RuleType.link]: {
-      match: inlineRegex(LINK_R),
-      order: Priority.LOW,
-      parse(capture, parse, context) {
-        return {
-          children: parseSimpleInline(parse, capture[1], context),
-          target: unescapeUrl(capture[2]),
-          title: capture[3],
-        }
+          context.inAnchor = context.inAnchor || tagName === 'a'
+
+          if (noInnerParse) {
+            ast.text = capture[3]
+          } else {
+            ast.children = parseFunc(parse, trimmed, context)
+          }
+
+          /**
+           * if another html block is detected within, parse as block,
+           * otherwise parse as inline to pick up any further markdown
+           */
+          context.inAnchor = false
+
+          return ast
+        },
       },
-    },
+    ],
+
+    [
+      RuleType.htmlSelfClosing,
+      {
+        /**
+         * find the first matching end tag and process the interior
+         */
+        match: anyScopeRegex(HTML_SELF_CLOSING_ELEMENT_R),
+        order: Priority.HIGH,
+        parse(capture /*, parse, context*/) {
+          return {
+            attrs: attrStringToMap(capture[2] || ''),
+            tag: capture[1].trim(),
+          }
+        },
+      },
+    ],
+
+    [
+      RuleType.htmlComment,
+      {
+        match: anyScopeRegex(HTML_COMMENT_R),
+        order: Priority.HIGH,
+        parse() {
+          return {}
+        },
+      },
+    ],
+
+    [
+      RuleType.image,
+      {
+        match: simpleInlineRegex(IMAGE_R),
+        order: Priority.HIGH,
+        parse(capture /*, parse, context*/) {
+          return {
+            alt: capture[1],
+            target: unescapeUrl(capture[2]),
+            title: capture[3],
+          }
+        },
+      } as MarkdownToJSX.Rule<{
+        alt?: string
+        target: string
+        title?: string
+      }>,
+    ],
+
+    [
+      RuleType.link,
+      {
+        match: inlineRegex(LINK_R),
+        order: Priority.LOW,
+        parse(capture, parse, context) {
+          return {
+            children: parseSimpleInline(parse, capture[1], context),
+            target: unescapeUrl(capture[2]),
+            title: capture[3],
+          }
+        },
+      },
+    ],
 
     // https://daringfireball.net/projects/markdown/syntax#autolink
-    [RuleType.linkAngleBraceStyleDetector]: {
-      match: inlineRegex(LINK_AUTOLINK_R),
-      order: Priority.MAX,
-      parse(capture /*, parse, context*/) {
-        return {
-          children: [
-            {
-              text: capture[1],
-              type: RuleType.text,
-            },
-          ],
-          target: capture[1],
-          type: RuleType.link,
-        }
+    [
+      RuleType.linkAngleBraceStyleDetector,
+      {
+        match: inlineRegex(LINK_AUTOLINK_R),
+        order: Priority.MAX,
+        parse(capture /*, parse, context*/) {
+          return {
+            children: [
+              {
+                text: capture[1],
+                type: RuleType.text,
+              },
+            ],
+            target: capture[1],
+            type: RuleType.link,
+          }
+        },
       },
-    },
+    ],
 
-    [RuleType.linkBareUrlDetector]: {
-      match: (source, context) => {
-        if (context.inAnchor) {
-          return null
-        }
-        return inlineRegex(LINK_AUTOLINK_BARE_URL_R)(source, context)
+    [
+      RuleType.linkBareUrlDetector,
+      {
+        match: (source, context) => {
+          if (context.inAnchor) {
+            return null
+          }
+          return inlineRegex(LINK_AUTOLINK_BARE_URL_R)(source, context)
+        },
+        order: Priority.MAX,
+        parse(capture /*, parse, context*/) {
+          return {
+            children: [
+              {
+                text: capture[1],
+                type: RuleType.text,
+              },
+            ],
+            target: capture[1],
+            title: undefined,
+            type: RuleType.link,
+          }
+        },
       },
-      order: Priority.MAX,
-      parse(capture /*, parse, context*/) {
-        return {
-          children: [
-            {
-              text: capture[1],
-              type: RuleType.text,
-            },
-          ],
-          target: capture[1],
-          title: undefined,
-          type: RuleType.link,
-        }
+    ],
+
+    [
+      RuleType.linkMailtoDetector,
+      {
+        match: inlineRegex(LINK_AUTOLINK_MAILTO_R),
+        order: Priority.MAX,
+        parse(capture /*, parse, context*/) {
+          let address = capture[1]
+          let target = capture[1]
+
+          // Check for a `mailto:` already existing in the link:
+          if (!AUTOLINK_MAILTO_CHECK_R.test(target)) {
+            target = 'mailto:' + target
+          }
+
+          return {
+            children: [
+              {
+                text: address.replace('mailto:', ''),
+                type: RuleType.text,
+              },
+            ],
+            target: target,
+            type: RuleType.link,
+          }
+        },
       },
-    },
+    ],
 
-    [RuleType.linkMailtoDetector]: {
-      match: inlineRegex(LINK_AUTOLINK_MAILTO_R),
-      order: Priority.MAX,
-      parse(capture /*, parse, context*/) {
-        let address = capture[1]
-        let target = capture[1]
+    [
+      RuleType.orderedList,
+      generateListRule(
+        ORDERED
+      ) as MarkdownToJSX.Rule<MarkdownToJSX.OrderedListNode>,
+    ],
 
-        // Check for a `mailto:` already existing in the link:
-        if (!AUTOLINK_MAILTO_CHECK_R.test(target)) {
-          target = 'mailto:' + target
-        }
+    [
+      RuleType.unorderedList,
+      generateListRule(
+        UNORDERED
+      ) as MarkdownToJSX.Rule<MarkdownToJSX.UnorderedListNode>,
+    ],
 
-        return {
-          children: [
-            {
-              text: address.replace('mailto:', ''),
-              type: RuleType.text,
-            },
-          ],
-          target: target,
-          type: RuleType.link,
-        }
+    [
+      RuleType.newlineCoalescer,
+      {
+        match: blockRegex(CONSECUTIVE_NEWLINE_R),
+        order: Priority.LOW,
+        parse: captureNothing,
       },
-    },
+    ],
 
-    [RuleType.orderedList]: generateListRule(
-      ORDERED
-    ) as MarkdownToJSX.Rule<MarkdownToJSX.OrderedListNode>,
+    [
+      RuleType.paragraph,
+      {
+        match: matchParagraph,
+        order: Priority.LOW,
+        parse: parseCaptureInline,
+      } as MarkdownToJSX.Rule<ReturnType<typeof parseCaptureInline>>,
+    ],
 
-    [RuleType.unorderedList]: generateListRule(
-      UNORDERED
-    ) as MarkdownToJSX.Rule<MarkdownToJSX.UnorderedListNode>,
+    [
+      RuleType.ref,
+      {
+        match: inlineRegex(REFERENCE_IMAGE_OR_LINK),
+        order: Priority.MAX,
+        parse(capture, parse, context) {
+          context.refs[capture[1]] = {
+            target: capture[2],
+            title: capture[4],
+          }
 
-    [RuleType.newlineCoalescer]: {
-      match: blockRegex(CONSECUTIVE_NEWLINE_R),
-      order: Priority.LOW,
-      parse: captureNothing,
-    },
-
-    [RuleType.paragraph]: {
-      match: matchParagraph,
-      order: Priority.LOW,
-      parse: parseCaptureInline,
-    } as MarkdownToJSX.Rule<ReturnType<typeof parseCaptureInline>>,
-
-    [RuleType.ref]: {
-      match: inlineRegex(REFERENCE_IMAGE_OR_LINK),
-      order: Priority.MAX,
-      parse(capture, parse, context) {
-        context.refs[capture[1]] = {
-          target: capture[2],
-          title: capture[4],
-        }
-
-        return {}
+          return {}
+        },
       },
-    },
+    ],
 
-    [RuleType.refImage]: {
-      match: simpleInlineRegex(REFERENCE_IMAGE_R),
-      order: Priority.MAX,
-      parse(capture) {
-        return {
-          alt: capture[1] || undefined,
-          ref: capture[2],
-        }
+    [
+      RuleType.refImage,
+      {
+        match: simpleInlineRegex(REFERENCE_IMAGE_R),
+        order: Priority.MAX,
+        parse(capture) {
+          return {
+            alt: capture[1] || undefined,
+            ref: capture[2],
+          }
+        },
+      } as MarkdownToJSX.Rule<{ alt?: string; ref: string }>,
+    ],
+
+    [
+      RuleType.refLink,
+      {
+        match: inlineRegex(REFERENCE_LINK_R),
+        order: Priority.MAX,
+        parse(capture, parse, context) {
+          return {
+            children: parse(capture[1], context),
+            fallbackChildren: parse(
+              capture[0].replace(SQUARE_BRACKETS_R, '\\$1'),
+              context
+            ),
+            ref: capture[2],
+          }
+        },
       },
-    } as MarkdownToJSX.Rule<{ alt?: string; ref: string }>,
+    ],
 
-    [RuleType.refLink]: {
-      match: inlineRegex(REFERENCE_LINK_R),
-      order: Priority.MAX,
-      parse(capture, parse, context) {
-        return {
-          children: parse(capture[1], context),
-          fallbackChildren: parse(
-            capture[0].replace(SQUARE_BRACKETS_R, '\\$1'),
-            context
-          ),
-          ref: capture[2],
-        }
+    [
+      RuleType.table,
+      {
+        match: blockRegex(NP_TABLE_R),
+        order: Priority.HIGH,
+        parse: parseTable,
       },
-    },
+    ],
 
-    [RuleType.table]: {
-      match: blockRegex(NP_TABLE_R),
-      order: Priority.HIGH,
-      parse: parseTable,
-    },
-
-    [RuleType.text]: {
-      // Here we look for anything followed by non-symbols,
-      // double newlines, or double-space-newlines
-      // We break on any symbol characters so that this grammar
-      // is easy to extend without needing to modify this regex
-      match: anyScopeRegex(TEXT_PLAIN_R),
-      order: Priority.MIN,
-      parse(capture /*, parse, context*/) {
-        return {
-          text: capture[0]
-            // nbsp -> unicode equivalent for named chars
-            .replace(HTML_CHAR_CODE_R, (full, inner) => {
-              return options.namedCodesToUnicode[inner]
-                ? options.namedCodesToUnicode[inner]
-                : full
-            }),
-        }
+    [
+      RuleType.text,
+      {
+        // Here we look for anything followed by non-symbols,
+        // double newlines, or double-space-newlines
+        // We break on any symbol characters so that this grammar
+        // is easy to extend without needing to modify this regex
+        match: anyScopeRegex(TEXT_PLAIN_R),
+        order: Priority.MIN,
+        parse(capture /*, parse, context*/) {
+          return {
+            text: capture[0]
+              // nbsp -> unicode equivalent for named chars
+              .replace(HTML_CHAR_CODE_R, (full, inner) => {
+                return options.namedCodesToUnicode[inner]
+                  ? options.namedCodesToUnicode[inner]
+                  : full
+              }),
+          }
+        },
       },
-    },
+    ],
 
-    [RuleType.textFormatted]: {
-      match: simpleInlineRegex(INLINE_FORMATTING_R),
-      order: Priority.MED,
-      parse(capture, parse, context) {
-        let type
+    [
+      RuleType.textFormatted,
+      {
+        match: simpleInlineRegex(INLINE_FORMATTING_R),
+        order: Priority.MED,
+        parse(capture, parse, context) {
+          let type
 
-        switch (capture[1]) {
-          case '__':
-          case '**':
-            type = RuleType.textBolded
-            break
-          case '_':
-          case '*':
-            type = RuleType.textEmphasized
-            break
-          case '~~':
-            type = RuleType.textStrikethroughed
-            break
-          case '==':
-            type = RuleType.textMarked
-            break
-          default:
-            type = RuleType.text
-            break
-        }
+          switch (capture[1]) {
+            case '__':
+            case '**':
+              type = RuleType.textBolded
+              break
+            case '_':
+            case '*':
+              type = RuleType.textEmphasized
+              break
+            case '~~':
+              type = RuleType.textStrikethroughed
+              break
+            case '==':
+              type = RuleType.textMarked
+              break
+            default:
+              type = RuleType.text
+              break
+          }
 
-        return {
-          children: parse(capture[3], context),
-          type,
-        }
+          return {
+            children: parse(capture[3], context),
+            type,
+          }
+        },
       },
-    },
+    ],
 
-    [RuleType.textEscaped]: {
-      // We don't allow escaping numbers, letters, or spaces here so that
-      // backslashes used in plain text still get rendered. But allowing
-      // escaping anything else provides a very flexible escape mechanism,
-      // regardless of how this grammar is extended.
-      match: simpleInlineRegex(TEXT_ESCAPED_R),
-      order: Priority.HIGH,
-      parse(capture /*, parse, context*/) {
-        return {
-          text: capture[1],
-          type: RuleType.text,
-        }
+    [
+      RuleType.textEscaped,
+      {
+        // We don't allow escaping numbers, letters, or spaces here so that
+        // backslashes used in plain text still get rendered. But allowing
+        // escaping anything else provides a very flexible escape mechanism,
+        // regardless of how this grammar is extended.
+        match: simpleInlineRegex(TEXT_ESCAPED_R),
+        order: Priority.HIGH,
+        parse(capture /*, parse, context*/) {
+          return {
+            text: capture[1],
+            type: RuleType.text,
+          }
+        },
       },
-    },
-  }
+    ],
+  ]
 
   // Object.keys(rules).forEach(key => {
   //   let { match: match, parse: parse } = rules[key]
@@ -1833,12 +1932,11 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
   //   }
   // })
 
-  if (options.disableParsingRawHTML === true) {
-    delete rules[RuleType.htmlBlock]
-    delete rules[RuleType.htmlSelfClosing]
+  if (options.disableParsingRawHTML) {
+    options.disabledRules.push(RuleType.htmlBlock, RuleType.htmlSelfClosing)
   }
 
-  const doParse = parserFor(rules)
+  const doParse = parserFor(rules, options)
 
   /**
    * A function that returns AST and resulting state context for given markdown.
@@ -2236,7 +2334,9 @@ export namespace MarkdownToJSX {
       prevCapturedString?: string
     ) => RegExpMatchArray
     order: Priority
-    parse: MarkdownToJSX.Parser<Omit<ParserOutput, 'type'>>
+    parse: MarkdownToJSX.Parser<
+      Omit<ParserOutput, 'type'> & { type?: RuleType }
+    >
   }
 
   export type Rules = {
@@ -2272,8 +2372,24 @@ export namespace MarkdownToJSX {
      * Disable the compiler's best-effort transcription of provided raw HTML
      * into JSX-equivalent. This is the functionality that prevents the need to
      * use `dangerouslySetInnerHTML` in React.
+     *
+     * Passing `true` is equivalent to `disabledRules: [RuleType.htmlBlock, RuleType.htmlSelfClosing]`
      */
     disableParsingRawHTML: boolean
+
+    /**
+     * Selectively disable particular syntaxes. Note that `RuleType.text` cannot be disabled.
+     *
+     * ```
+     * options: {
+     *   // this would turn off blockquotes and leave other syntaxes enabled
+     *   disabledRules: [
+     *     RuleType.blockQuote
+     *   ]
+     * }
+     * ```
+     */
+    disabledRules?: RuleType[] | undefined
 
     /**
      * Forces the compiler to have space between hash sign and the header text which
@@ -2282,6 +2398,20 @@ export namespace MarkdownToJSX {
      * `The opening sequence of # characters must be followed by a space or by the end of line.`
      */
     enforceAtxHeadings: boolean
+
+    /**
+     * Selectively enable particular syntaxes. Note that `RuleType.text` is always enabled.
+     *
+     * ```
+     * options: {
+     *   // this would only enable ultra-basic parsing of inline formats and no block syntaxes
+     *   enabledRules: [
+     *     RuleType.textFormatted
+     *   ]
+     * }
+     * ```
+     */
+    enabledRules?: RuleType[] | undefined
 
     /**
      * Forces the compiler to always output content with a block-level wrapper
