@@ -49,7 +49,7 @@ export const enum RuleType {
   unorderedList = '33',
 }
 
-const enum Priority {
+export const enum Priority {
   /**
    * anything that must scan the tree before everything else
    */
@@ -805,7 +805,7 @@ function inlineRegex(regex: RegExp) {
 }
 
 // basically any inline element except links
-function simpleInlineRegex(regex: RegExp) {
+export function simpleInlineRegex(regex: RegExp) {
   return function match(source: string, context: MarkdownToJSX.Context) {
     if (context.inline || context.simple) {
       return regex.exec(source)
@@ -816,7 +816,7 @@ function simpleInlineRegex(regex: RegExp) {
 }
 
 // Creates a match function for a block scoped element from a regex
-function blockRegex(regex: RegExp) {
+export function blockRegex(regex: RegExp) {
   return function match(source: string, context: MarkdownToJSX.Context) {
     if (context.inline || context.simple) {
       return null
@@ -827,7 +827,7 @@ function blockRegex(regex: RegExp) {
 }
 
 // Creates a match function from a regex, ignoring block/inline scope
-function anyScopeRegex(regex: RegExp) {
+export function anyScopeRegex(regex: RegExp) {
   return function match(source: string /*, context*/) {
     return regex.exec(source)
   }
@@ -1345,6 +1345,7 @@ function getTag(tag: string, overrides: MarkdownToJSX.Overrides) {
  * AST nodes.
  */
 export function createMarkdown(options: MarkdownToJSX.Options = {}) {
+  options.customRules ||= []
   options.disabledRules ||= []
   options.enabledRules ||= []
   options.overrides ||= {}
@@ -1936,7 +1937,10 @@ export function createMarkdown(options: MarkdownToJSX.Options = {}) {
     options.disabledRules.push(RuleType.htmlBlock, RuleType.htmlSelfClosing)
   }
 
-  const doParse = parserFor(rules, options)
+  const doParse = parserFor(
+    rules.concat(options.customRules as typeof rules),
+    options
+  )
 
   /**
    * A function that returns AST and resulting state context for given markdown.
@@ -2367,6 +2371,18 @@ export namespace MarkdownToJSX {
       props: JSX.IntrinsicAttributes,
       ...children: React.ReactNode[]
     ) => React.ReactChild
+
+    /**
+     * Supply custom rule tuples; this allows for creation and handling of arbitrary syntaxes
+     * within markdown. Note that `renderRule` needs to be composed as well to intercept the new
+     * rules you have added and output appropriate JSX.
+     *
+     * The key for each rule should be unique and have no overlap with `RuleType`.
+     *
+     * For inspiration, it's recommended to see the [source code for this library](https://github.com/quantizor/markdown-to-jsx/blob/main/index.tsx)
+     * and copy/modify an existing rule to get started.
+     */
+    customRules?: [key: string, rule: MarkdownToJSX.Rule][] | undefined
 
     /**
      * Disable the compiler's best-effort transcription of provided raw HTML
